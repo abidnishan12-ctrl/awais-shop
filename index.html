@@ -3,16 +3,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AWAIS</title>
 <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@500;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
-<!--
-SETUP (Firebase = real orders + admin login). Without it the site runs in DEMO mode (data stays in this browser; admin password: admin123).
-1. console.firebase.google.com > new project > add Web app > copy config into FIREBASE_CONFIG below.
-2. Build > Firestore Database (create) and Authentication > Email/Password > add your admin user.
-3. Firestore Rules:
-rules_version='2';service cloud.firestore{match /databases/{d}/documents{
- match /products/{i}{allow read:if true;allow write:if request.auth!=null}
- match /settings/{i}{allow read:if true;allow write:if request.auth!=null}
- match /orders/{i}{allow create:if true;allow read,update,delete:if request.auth!=null}}}
--->
 <style>
 :root{--c:#F3EBDD;--w:#FBF7EF;--s:#E4D6BE;--k:#241C15;--a:#5B5F3A}
 *{box-sizing:border-box;margin:0}
@@ -96,7 +86,7 @@ footer{border-top:1px solid var(--s);padding:34px 5vw;text-align:center;color:#6
 <nav><a href="#/" class="lg" id="nl"></a>
 <div class="m"><a href="#/">Home</a><a href="#/shop">Shop</a><a href="#/about">About</a><a href="#/contact">Contact</a><a href="#/cart">Cart<span id="cb">0</span></a></div></nav>
 <main id="app"></main>
-<footer><a href="#/" class="lg" id="fl"></a><p>© AWAIS · Made in Bangladesh</p><p><a href="#/admin"><small>Admin</small></a></p></footer>
+<footer><a href="#/" class="lg" id="fl"></a><p>© AWAIS · Made in Bangladesh</p><p><a href="#/track">Track your order</a></p><p><a href="#/admin"><small>Admin</small></a></p></footer>
 <div id="t"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -118,6 +108,7 @@ const LOGO=(z,dr)=>`<svg width="${z}" height="${z}" viewBox="0 0 60 60" fill="no
 const LS=(k,v)=>v===undefined?JSON.parse(localStorage.getItem(k)||'null'):localStorage.setItem(k,JSON.stringify(v));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const oid=i=>'AW-'+String(i).slice(-5).toUpperCase();
+const newNo=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return 'AW'+String(d.getFullYear()).slice(2)+p(d.getMonth()+1)+p(d.getDate())+'-'+(100+Math.floor(Math.random()*900))};
 const DEF={hero:'Dress quietly. Be remembered.',sub:'Timeless clothing made for everyday elegance.',about:'AWAIS is a Bangladeshi clothing brand. We design simple, comfortable pieces from quality fabric, made to last.',wa:'8801XXXXXXXXX',phone:'+880 1XXX-XXXXXX',addr:'Dhaka, Bangladesh',ship:100,pay:'Send money to bKash/Nagad 01XXXXXXXXX (Personal), then enter the Transaction ID.'};
 const DEMO=[['Classic Panjabi','Panjabi',1850],['Linen Shirt','Shirt',1450],['Cotton Kurti','Kurti',1250],['Everyday Tee','T-shirt',650]].map(([name,cat,price],i)=>({id:'d'+i,name,cat,price,sizes:'S,M,L,XL',desc:'Soft, breathable fabric with a clean fit.\nAdd your own details in the admin panel.',imgs:[],t:i}));
 let db=null,au=null;
@@ -129,9 +120,9 @@ const API={
  async delP(id){if(db)return db.collection('products').doc(id).delete();LS('aw_p',(await this.products()).filter(x=>x.id!=id))},
  async settings(){if(db){const d=await db.collection('settings').doc('main').get();return{...DEF,...d.data()}}return{...DEF,...LS('aw_s')}},
  async saveS(s){db?await db.collection('settings').doc('main').set(s):LS('aw_s',s)},
- async addOrder(o){o.t=Date.now();if(db)return oid((await db.collection('orders').add(o)).id);o.id=uid();LS('aw_o',[o,...(LS('aw_o')||[])]);return oid(o.id)},
+ async addOrder(o){o.t=Date.now();o.status='New';o.no=newNo();o.id=o.no;if(db){await db.collection('orders').doc(o.no).set(o);await db.collection('track').doc(o.no).set({status:'New'})}else{LS('aw_o',[o,...(LS('aw_o')||[])]);LS('aw_t',{...(LS('aw_t')||{}),[o.no]:'New'})}return o.no},
  async orders(){if(db)return(await db.collection('orders').orderBy('t','desc').get()).docs.map(d=>({id:d.id,...d.data()}));return LS('aw_o')||[]},
- async setStatus(id,s){if(db)return db.collection('orders').doc(id).update({status:s});LS('aw_o',(LS('aw_o')||[]).map(o=>o.id==id?{...o,status:s}:o))},
+ async setStatus(id,s){if(db){await db.collection('orders').doc(id).update({status:s});return db.collection('track').doc(id).set({status:s},{merge:true})}LS('aw_o',(LS('aw_o')||[]).map(o=>o.id==id?{...o,status:s}:o));LS('aw_t',{...(LS('aw_t')||{}),[id]:s})},
  watch(cb){if(db)db.collection('orders').onSnapshot(s=>cb(s.docs));else setInterval(async()=>cb(await this.orders()),3000)},
  isAdmin(){return db?!!au.currentUser:!!LS('aw_adm')},
  async login(e,p){if(db)return au.signInWithEmailAndPassword(e,p);if(p!=DEMO_PASS)throw 0;LS('aw_adm',1)},
@@ -176,7 +167,9 @@ const o={name:f.get('n'),phone:f.get('p'),addr:f.get('a'),pay:f.get('m'),trx:f.g
 e.target.querySelector('button').disabled=true;
 try{const id=await API.addOrder(o);setCart([]);
 const msg=`New order ${id}\n`+items.map(i=>`• ${i.name} (${i.size}) x${i.qty}`).join('\n')+`\nTotal: ${money(total)}\nName: ${o.name}\nPhone: ${o.phone}\nAddress: ${o.addr}\nPayment: ${o.pay} ${o.trx}`;
-app.innerHTML=`<section class="sec c"><div class="tick">✓</div><h2>Thank you, ${esc(o.name)}</h2><p>Order <b>${id}</b> is received. We will call you to confirm.</p><br><a class="btn" target="_blank" href="https://wa.me/${esc(S.wa)}?text=${encodeURIComponent(msg)}">Send order on WhatsApp</a> <a class="btn o" href="#/">Home</a></section>`}catch(x){toast('Order failed. Please try again.');e.target.querySelector('button').disabled=false}}
+app.innerHTML=`<section class="sec c"><div class="tick">✓</div><h2>Thank you, ${esc(o.name)}</h2><p>Your order number is <b>${esc(id)}</b>. Keep it to track your order.</p><br><a class="btn" target="_blank" href="https://wa.me/${esc(S.wa)}?text=${encodeURIComponent(msg)}">Send order on WhatsApp</a> <a class="btn o" href="#/track">Track order</a> <a class="btn o" href="#/">Home</a></section>`}catch(x){toast('Order failed. Please try again.');e.target.querySelector('button').disabled=false}}
+const trackPage=()=>`<section class="sec nar"><h2>Track your order</h2><form class="fm" onsubmit="trk(event)"><input name="n" placeholder="Order number (e.g. AW261111-472)" required><button class="btn">Check status</button></form><div id="tr"></div></section>`;
+async function trk(e){e.preventDefault();const n=e.target.n.value.trim().toUpperCase();let s=null;try{if(db){const d=await db.collection('track').doc(n).get();s=d.exists?d.data().status:null}else s=(LS('aw_t')||{})[n]||null}catch(x){}$('#tr').innerHTML=s?`<p style="margin-top:24px">Order <b>${esc(n)}</b> is: <b>${esc(s)}</b></p>`:'<p style="margin-top:24px">No order found with that number.</p>'}
 const about=()=>`<section class="sec nar"><h2>About AWAIS</h2><p style="white-space:pre-line">${esc(S.about)}</p></section>`;
 const contact=()=>`<section class="sec nar"><h2>Contact</h2><p>${esc(S.addr)}</p><p><a href="tel:${esc(S.phone)}">${esc(S.phone)}</a></p><br><a class="btn" target="_blank" href="https://wa.me/${esc(S.wa)}">Chat on WhatsApp</a></section>`;
 
@@ -186,7 +179,7 @@ function watch(){if(watching++)return;let n=null;API.watch(os=>{if(n!==null&&os.
 async function adm(){
  if(!API.isAdmin())return app.innerHTML=`<section class="sec nar"><h2>Admin login</h2><form class="fm" onsubmit="login(event)">${db?'<input name="e" type="email" placeholder="Email" required>':''}<input name="p" type="password" placeholder="Password" required><button class="btn">Log in</button>${db?'':'<small>Demo password: admin123</small>'}</form></section>`;
  watch();const O=await API.orders();let h='';
- if(A.tab=='o')h=O.length?O.map(o=>`<div class="ord"><div><b>${oid(o.id)}</b> · ${new Date(o.t).toLocaleString()}<br><b>${esc(o.name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a><br>${esc(o.addr)}<br>${o.items.map(i=>`${esc(i.name)} (${esc(i.size)}) x${i.qty}`).join(', ')}<br>${esc(o.pay)} ${esc(o.trx)} · <b>${money(o.total)}</b>${o.note?'<br>Note: '+esc(o.note):''}</div><select onchange="API.setStatus('${o.id}',this.value)">${['New','Confirmed','Shipped','Delivered','Cancelled'].map(s=>`<option ${s==o.status?'selected':''}>${s}</option>`).join('')}</select></div>`).join(''):'<p>No orders yet. New orders appear here with a sound.</p>';
+ if(A.tab=='o')h=O.length?O.map(o=>`<div class="ord"><div><b>${esc(o.no||o.id)}</b> · ${new Date(o.t).toLocaleString()}<br><b>${esc(o.name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a><br>${esc(o.addr)}<br>${o.items.map(i=>`${esc(i.name)} (${esc(i.size)}) x${i.qty}`).join(', ')}<br>${esc(o.pay)} ${esc(o.trx)} · <b>${money(o.total)}</b>${o.note?'<br>Note: '+esc(o.note):''}</div><select onchange="API.setStatus('${o.id}',this.value)">${['New','Confirmed','Shipped','Delivered','Cancelled'].map(s=>`<option ${s==o.status?'selected':''}>${s}</option>`).join('')}</select></div>`).join(''):'<p>No orders yet. New orders appear here with a sound.</p>';
  if(A.tab=='p'){const e=P.find(x=>x.id==A.edit)||{};
   h=`<form class="fm" onsubmit="saveP(event)"><h3>${e.id?'Edit':'Add'} product</h3><input type="hidden" name="id" value="${e.id||''}"><input name="n" placeholder="Product name" value="${esc(e.name)}" required><input name="pr" type="number" placeholder="Price (৳)" value="${e.price||''}" required><input name="c" placeholder="Category (e.g. Panjabi)" value="${esc(e.cat)}" required><input name="sz" placeholder="Sizes: S,M,L,XL" value="${esc(e.sizes||'S,M,L,XL')}"><textarea name="d" rows="4" placeholder="Details">${esc(e.desc)}</textarea><label>Photos (up to 4${e.id?'; new photos replace old':''})<input name="im" type="file" accept="image/*" multiple></label><button class="btn">${e.id?'Update':'Add'} product</button></form><br>`+P.map(p=>`<div class="row"><div class="im sm">${img(p)}</div><div><b>${esc(p.name)}</b><br>${money(p.price)}</div><button class="btn o" onclick="A.edit='${p.id}';adm();scrollTo(0,0)">Edit</button><button class="btn o" onclick="delP('${p.id}')">Delete</button></div>`).join('')}
  if(A.tab=='s')h=`<form class="fm" onsubmit="saveS(event)">${[['hero','Home title'],['sub','Home subtitle'],['about','About text','t'],['wa','WhatsApp number (e.g. 8801700000000)'],['phone','Phone'],['addr','Address'],['ship','Delivery charge (৳)'],['pay','Bkash/Nagad instructions','t']].map(([k,l,t])=>`<label>${l}${t?`<textarea name="${k}" rows="4">${esc(S[k])}</textarea>`:`<input name="${k}" value="${esc(S[k])}">`}</label>`).join('')}<button class="btn">Save settings</button></form>`;
@@ -200,7 +193,7 @@ async function route(){
  const[pg,arg]=(location.hash.slice(2)||'').split('/');
  document.querySelectorAll('.m a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')=='#/'+pg));
  await load();app.classList.remove('in');
- const V={'':home,shop:()=>shop(arg),product:()=>product(arg),cart:cartv,checkout,about,contact};
+ const V={'':home,shop:()=>shop(arg),product:()=>product(arg),cart:cartv,checkout,about,contact,track:trackPage};
  if(pg=='admin')await adm();else app.innerHTML=(V[pg]||nf)();
  void app.offsetWidth;app.classList.add('in');scrollTo(0,0)}
 $('#nl').innerHTML=LOGO(34)+'<b class="f">AWAIS</b>';$('#fl').innerHTML=LOGO(30)+'<b class="f">AWAIS</b>';$('#spl').innerHTML=LOGO(110,1);
